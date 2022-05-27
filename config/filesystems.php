@@ -7,13 +7,9 @@ return [
             'driver' => 'local',
             'root' => 'storage',
         ],
-        'www_dir' => [
-            'driver' => 'local',
-            'root' => '/var/www/interviewWorkspace'
-        ],
         'public_html' => [
             'driver' => 'local',
-            'root' => '/var/www/html'
+            'root' => env('PUBLIC_HTML_PATH', '/var/www/html'),
         ],
     ],
 ];

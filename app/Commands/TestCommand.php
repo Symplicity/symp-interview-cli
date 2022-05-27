@@ -37,28 +37,29 @@ class TestCommand extends Command
      */
     public function handle()
     {
-        $this->codeServerPassword = 'SympInterview@'.rand(1000, 9999);
-        $this->line($this->getApplication()->getName());
-        $this->info('Starting code-server');
-        $command = 'export PASSWORD='.$this->codeServerPassword.';';
-        $command .= 'code-server';
-        $command .= ' /var/www/html';
-        $command .= ' --auth=password';
-        $command .= ' --cert=/home/ubuntu/certs/fullchain.pem'; // TODO: This can't be hardcoded
-        $command .= ' --cert-key=/home/ubuntu/certs/privkey.pem'; // TODO: This can't be hardcoded
+        $codeServerPassword = 'SympInterview@'.rand(1000, 9999);
 
-        /*$process = new Process([$command]);
-        $process->run();
-        foreach ($process as $type => $data) {
-            if ($process::OUT === $type) {
-                echo "\nRead from stdout: ".$data;
-            } else { // $process::ERR === $type
-                echo "\nRead from stderr: ".$data;
-            }
-        }*/
+        $command = 'export PASSWORD='.$codeServerPassword.';';
+        $command .= 'code-server';
+        $command .= ' /var/www/html/'.$this->candidateName;
+        $command .= ' --auth=password';
+        $command .= ' --bind-addr 0.0.0.0:'.env('CODE_SERVER_PORT', '8090');
+
+        if(env('CODE_SERVER_ENABLE_SSL', false) && env('CODE_SERVER_SSL_CERT_PATH', '') != ''){
+            // SSL enabled for code server
+            $command .= ' --cert='.env('CODE_SERVER_SSL_CERT_PATH'); 
+            $command .= ' --cert-key='.env('CODE_SERVER_SSL_KEY_PATH'); 
+            $this->codeServerSSL = true;
+        }
+        var_dump($command);
         $process = new BackgroundProcess($command);
         $process->run();
-        $this->info('Started with PID ' . $process->getPid());
+        $pid = $process->getPid();
+        if($process->isRunning()){
+            echo 'OK!';
+        }else{
+            echo 'FAILED!';
+        }
     }
 
 }

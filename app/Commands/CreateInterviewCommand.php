@@ -10,6 +10,7 @@ use Illuminate\Support\Str;
 use Origin\Filesystem\Folder as OriginDirFS;
 use Cocur\BackgroundProcess\BackgroundProcess;
 use App\Libraries\Lock;
+use Symfony\Component\Process\Process;
 
 class CreateInterviewCommand extends Command
 {
@@ -38,8 +39,9 @@ class CreateInterviewCommand extends Command
     ];
 
     private $codeServerPassword;
-    private $codeServerHost = 'interview.giovanne.dev';
+    private $codeServerHost;
     private $codeServerPort = 8090;
+    private $codeServerSSL = false;
 
     /**
      * Execute the console command.
@@ -48,19 +50,29 @@ class CreateInterviewCommand extends Command
      */
     public function handle()
     {
+        // Setup variables
+
+        $this->codeServerHost = env('CODE_SERVER_HOST');
+        $this->codeServerPort = env('CODE_SERVER_PORT');
+
+        // Run the command
         $this->line($this->getApplication()->getName());
 
         $candidateName = $this->argument('name');
         $candidateName = str_replace(' ', '_', $candidateName);
+        if(!$candidateName || empty($candidateName)){
+            $candidateName = $this->ask('Please enter the candidate name');
+        }
+        
         $this->info('Creating interview environment for ' . $candidateName);
         $this->candidateName = $candidateName;
 
         if ($this->task('Checking if interview workspace is writeable...', function () {
-            if (!is_writeable('/var/www/interviewWorkspace')) {
+            if (!is_writeable(env('PUBLIC_HTML_PATH', '/var/www/html'))) {
                 return false;
             }
         }, 'checking') === false) {
-            $this->displayError('The /var/www/interviewWorkspace is not writeable.');
+            $this->displayError('The '.env('PUBLIC_HTML_PATH', '/var/www/html').' is not writeable.');
         }
 
         if ($this->task('Checking if the name is not already used', function () {
@@ -85,6 +97,12 @@ class CreateInterviewCommand extends Command
             return $this->createCandidateDatabaseUser();
         }) === false){
             $this->displayError('There was an error creating the candidate database credentials.');
+        }
+
+        if($this->task('Cloning test repository...', function () {
+            return $this->cloneRepository();
+        }) === false){
+            $this->displayError('There was an error while cloning the test repository.');
         }
 
         if($this->task('Populating test folder with Skeleton files...', function () {
@@ -118,7 +136,8 @@ class CreateInterviewCommand extends Command
         $this->line('Once with vscode open in the browser, the candidate will find a INSTRUCTIONS.md file in the root of the project.');
         $this->line('This file contains all the information needed to run the interview, including database credentials, Base URL and PHPMyAdmin URL.');
         $this->newLine(2);
-        $this->info("Live Coding URL: https://".$this->codeServerHost.":".$this->codeServerPort);
+        $protocol = $this->codeServerSSL ? 'https://' : 'http://';
+        $this->info("Live Coding URL: ". $protocol . $this->codeServerHost . ":" . $this->codeServerPort);
         $this->info("Password: ".$this->codeServerPassword);
     }
 
@@ -137,14 +156,34 @@ class CreateInterviewCommand extends Command
 
     private function fixCandidateDirectoryPermissions()
     {
-        // TODO: Fix the ownership group
-        $chownResponse = OriginDirFS::chgrp('/var/www/html/' . $this->candidateName, 'www-data'); // TODO: Hardcoded path
-        $chmodResponse = OriginDirFS::chmod('/var/www/html/' . $this->candidateName, 0755); // TODO: Hardcoded path
-        if($chownResponse && $chmodResponse){
-            return true;
-        }else{
+        
+        $chownResponse = OriginDirFS::chgrp(env('PUBLIC_HTML_PATH', '/var/www/html'). '/' . $this->candidateName, env('PUBLIC_HTML_GROUP', 'www-data'));
+        $chmodResponse = OriginDirFS::chmod(env('PUBLIC_HTML_PATH', '/var/www/html'). '/' . $this->candidateName, env('CANDIDATE_FOLDER_PERMISSION', 0755));      
+
+        $chmodProcess = new Process([
+            'chmod',
+            '-R',
+            env('CANDIDATE_FOLDER_PERMISSION', 0755),
+            env('PUBLIC_HTML_PATH', '/var/www/html'). '/' . $this->candidateName
+        ]);
+
+        $chownProcess = new Process([
+            'chown',
+            '-R',
+            env('PUBLIC_HTML_USER', 'www-data'),
+            env('PUBLIC_HTML_PATH', '/var/www/html'). '/' . $this->candidateName
+        ]);
+
+        $chownProcess->start();
+        $chmodProcess->start();
+
+        // TODO: Check if the process was successfull.
+        /*if (!$chownProcess->isSuccessful() || !$chmodProcess->isSuccessful()) {
             return false;
-        }
+        }else{
+            return true;
+        }*/
+        return true;
     }
 
     private function checkCandidateDirExists()
@@ -187,7 +226,7 @@ class CreateInterviewCommand extends Command
     {
         // Check if the database user exists
         $dbUser = $this->candidateName . '_interview';
-        $dbPassword = 'SympTest@123';
+        $dbPassword = env('CANDIDATE_DEFAULT_MYSQL_PASSWORD', 'SympTest@123');
         $dbName = $this->databaseInfo['database'];
 
         $this->databaseInfo['username'] = $dbUser;
@@ -212,9 +251,9 @@ class CreateInterviewCommand extends Command
 
     private function populateCandidateFolder()
     {
-        $destination = '/var/www/html/' . $this->candidateName;
+        $destination = env('PUBLIC_HTML_PATH', '/var/www/html') . '/' . $this->candidateName;
 
-        $copyResponse = File::copyDirectory('storage/candidateFolderStub', $destination, true);
+        $copyResponse = File::copyDirectory(storage_path('candidateFolderStub'), $destination, true);
 
         // Replace the database info in the instruction file
         $instructionStub = $destination . '/INSTRUCTIONS.md';
@@ -234,8 +273,8 @@ class CreateInterviewCommand extends Command
             $this->databaseInfo['password'],
             $this->databaseInfo['database'],
             $this->databaseInfo['port'],
-            'https://interview.giovanne.dev/phpmyadmin/', // TODO: Hardcoded URL
-            'https://interview.giovanne.dev/'.$this->candidateName,
+            env('PUBLIC_URL').$this->candidateName,
+            env('PHPMYADMIN_URL'),
         ];
 
         $writeFileResponse = File::put(
@@ -257,18 +296,45 @@ class CreateInterviewCommand extends Command
     private function launchCodeServerInstance()
     {
         $this->codeServerPassword = 'SympInterview@'.rand(1000, 9999);
+
         $command = 'export PASSWORD='.$this->codeServerPassword.';';
         $command .= 'code-server';
         $command .= ' /var/www/html/'.$this->candidateName;
         $command .= ' --auth=password';
-        $command .= ' --cert=/home/ubuntu/certs/fullchain.pem'; // TODO: This can't be hardcoded
-        $command .= ' --cert-key=/home/ubuntu/certs/privkey.pem'; // TODO: This can't be hardcoded
+        $command .= ' --bind-addr 0.0.0.0:'.env('CODE_SERVER_PORT', '8090');
 
+        if(env('CODE_SERVER_ENABLE_SSL', false) && env('CODE_SERVER_SSL_CERT_PATH', '') != ''){
+            // SSL enabled for code server
+            $command .= ' --cert='.env('CODE_SERVER_SSL_CERT_PATH'); 
+            $command .= ' --cert-key='.env('CODE_SERVER_SSL_KEY_PATH'); 
+            $this->codeServerSSL = true;
+        }
         $process = new BackgroundProcess($command);
         $process->run();
         $pid = $process->getPid();
         if($process->isRunning()){
             return DB::insert('INSERT INTO code_server_instances (candidate_name, pid, password, status, started_at) VALUES (?, ?, ?, 1, NOW())', [$this->candidateName, $pid, $this->codeServerPassword]);
+        }else{
+            return false;
+        }
+    }
+
+    private function cloneRepository()
+    {
+        if(env('CODING_TEST_REPO') == ''){
+            return false;
+        }
+        $Process = new Process([
+            'git',
+            'clone',
+            env('CODING_TEST_REPO'),
+            './'
+        ]);
+
+        $Process->setWorkingDirectory(env('PUBLIC_HTML_PATH', '/var/www/html') . '/' . $this->candidateName);
+        $Process->run();
+        if($Process->isSuccessful()){
+            return true;
         }else{
             return false;
         }
