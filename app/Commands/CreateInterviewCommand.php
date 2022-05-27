@@ -269,8 +269,8 @@ class CreateInterviewCommand extends Command
             $this->databaseInfo['password'],
             $this->databaseInfo['database'],
             $this->databaseInfo['port'],
-            env('PUBLIC_URL'),
-            env('PHPMYADMIN_URL').$this->candidateName,
+            env('PUBLIC_URL').$this->candidateName,
+            env('PHPMYADMIN_URL'),
         ];
 
         $writeFileResponse = File::put(

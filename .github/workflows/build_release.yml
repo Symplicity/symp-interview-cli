@@ -4,6 +4,8 @@ on:
   push:
     branches: [ master ]
 
+permissions: write-all
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -17,7 +19,7 @@ jobs:
       id: semver_tagbump
       uses: anothrNick/github-tag-action@1.36.0
       env:
-        GITHUB_TOKEN: ${{ secrets.ACCESS_TOKEN}}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN}}
         WITH_V: false
         DEFAULT_BUMP: patch
       
@@ -31,7 +33,7 @@ jobs:
       id: changelog
       uses: loopwerk/tag-changelog@v1
       with:
-        token: ${{ secrets.ACCESS_TOKEN }}
+        token: ${{ secrets.GITHUB_TOKEN }}
       
     - name: Create release
       uses: actions/create-release@v1
@@ -43,12 +45,12 @@ jobs:
         tag_name: ${{ steps.semver_tagbump.outputs.new_tag}}
         body: ${{ steps.changelog.outputs.changes }}
       env:
-        GITHUB_TOKEN: ${{github.token}}
+        GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
         
     - name: Upload artifacts
       uses: actions/upload-release-asset@v1
       env:
-        GITHUB_TOKEN: ${{ secrets.ACCESS_TOKEN}}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN}}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
         asset_path: builds/ivcli

@@ -36,6 +36,10 @@ class CloseInterviewCommand extends Command
 
     private $backupCandidateFiles = true;
 
+    private $hireRecommendation;
+
+    private $indicatedPosition;
+
     private $error;
 
     private $mysqldumpPath = '/usr/bin/mysqldump';
@@ -96,7 +100,11 @@ class CloseInterviewCommand extends Command
 
         $this->completionSteps = $this->question('How many steps the candidate completed before the end of the test?', 0);
 
-        $this->indicatedPosition = $this->choice('Which position did the candidate indicate?', ['junior', 'plain', 'senior']);
+        $this->hireRecommendation = $this->choice('What\'s your recommendation for this candidate?', ['strong no hire', 'not recommended', 'recommended', 'strong hire']);
+
+        if($this->hireRecommendation > 1){
+            $this->indicatedPosition = $this->choice('What\'s the indicated position for this candidate?', ['junior', 'mid', 'senior', 'lead', 'other']);
+        }
 
 
         $this->info('Closing interview environment for ' . $this->candidateName);
@@ -268,7 +276,15 @@ class CloseInterviewCommand extends Command
         // Set the interview ID
         $this->interviewId = $meta[0]->id;
 
-        $process = BackgroundProcess::createFromPID($meta[0]->pid);
+        // Get list of all PIDs from /usr/lib/code-server process
+
+        $cmdOutput = explode("\n", shell_exec("ps aux | grep /usr/lib/code-server | awk '{print $2}'"));
+        if (!is_array($cmdOutput)) {
+            // TODO: soft-execution adaptations here
+            $this->error('Error while fetching PIDs from Code-server process');
+            return false;
+        }
+
         /*
             // TODO: This was disabled until I found a way to return if the process was already killed
             // or insert a command flag to allow the "soft-execution" of this script
@@ -278,13 +294,19 @@ class CloseInterviewCommand extends Command
             $this->error('The session is already closed or process not found.');
             return false;
         }*/
-
-        if ($process->stop()) {
-            DB::table('code_server_instances')->where('candidate_name', $candidateName)->update(['status' => 0]);
-            return true;
-        }else{
-            $this->error('Error while closing code-server session.');
-            return false;
+        foreach ($cmdOutput as $pid) {
+            if ($pid == '') {
+                continue;
+            }
+            $pid = trim($pid);
+            $process = BackgroundProcess::createFromPID($pid);
+            if ($process->stop()) {
+                DB::table('code_server_instances')->where('candidate_name', $candidateName)->update(['status' => 0]);
+                return true;
+            } else {
+                $this->error('Error while closing code-server session.');
+                return false;
+            }
         }
     }
 
@@ -313,7 +335,15 @@ class CloseInterviewCommand extends Command
         // Here we can insert some code to run after the candidate has been removed
 
         // Update the candidate's status and recommendations
-        
+
+        // TODO: Calculate the general score based on how many steps the candidate completed and how much time it took.
+        // For now, we'll just set it to 0.
+        $score = 0;
+        DB::update(
+            'UPDATE code_server_instances SET hire_recommendation_level = ?, position_level_recommendation = ?, general_score = ? WHERE id = ?',
+             [$this->hireRecommendation, $this->indicatedPosition, $score, $this->interviewId]
+        );
+
 
         // Write the end time for the interview
         // TODO: Write a better query for this
