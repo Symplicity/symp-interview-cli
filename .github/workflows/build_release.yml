@@ -1,4 +1,4 @@
-name: CLI Build
+name: CLI Release Build
 
 on:
   push:

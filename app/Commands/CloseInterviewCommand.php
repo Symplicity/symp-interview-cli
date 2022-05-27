@@ -21,7 +21,7 @@ class CloseInterviewCommand extends Command
      *
      * @var string
      */
-    protected $signature = 'close {name : The candidate name (required)}';
+    protected $signature = 'close {name? : The candidate name (required)}';
 
     /**
      * The description of the command.
@@ -59,6 +59,11 @@ class CloseInterviewCommand extends Command
         // Run the app
 
         $this->line($this->getApplication()->getName());
+
+        if(!$this->argument('name') || empty($this->argument('name'))){
+            $candidateName = $this->ask('Please enter the candidate name');
+        }
+
         $this->candidateName = str_replace(' ', '_', $this->argument('name'));
 
         if ($this->task('Running pre-checks...', function () {
@@ -98,13 +103,17 @@ class CloseInterviewCommand extends Command
         $this->backupCandidateFiles = $this->confirm('Do you want to backup the candidate files and database?', true);
         $this->removeCandidateData = $this->confirm('Do you want to delete the candidate files and database?', true);
 
-        $this->completionSteps = $this->question('How many steps the candidate completed before the end of the test?', 0);
+        $this->completionSteps = $this->menu('How many steps the candidate completed before the end of the test?', [
+            '1 step', 
+            '2 steps',
+            '3 steps',
+            '4 steps',
+            '5 steps',
+        ])->disableDefaultItems()->open();
 
-        $this->hireRecommendation = $this->choice('What\'s your recommendation for this candidate?', ['strong no hire', 'not recommended', 'recommended', 'strong hire']);
+        $this->hireRecomendation = $this->menu('What\'s your recommendation for this candidate?', ['strong no hire', 'not recommended', 'recommended', 'strong hire'], 'strong hire')->disableDefaultItems()->open();
 
-        if($this->hireRecommendation > 1){
-            $this->indicatedPosition = $this->choice('What\'s the indicated position for this candidate?', ['junior', 'mid', 'senior', 'lead', 'other']);
-        }
+        $this->indicatedPosition = $this->menu('What\'s the indicated position for this candidate?', ['junior', 'mid', 'senior', 'lead', 'other'], 'other')->disableDefaultItems()->open();
 
 
         $this->info('Closing interview environment for ' . $this->candidateName);
@@ -341,7 +350,7 @@ class CloseInterviewCommand extends Command
         $score = 0;
         DB::update(
             'UPDATE code_server_instances SET hire_recommendation_level = ?, position_level_recommendation = ?, general_score = ? WHERE id = ?',
-             [$this->hireRecommendation, $this->indicatedPosition, $score, $this->interviewId]
+            [$this->hireRecommendation, $this->indicatedPosition, $score, $this->interviewId]
         );
 
 

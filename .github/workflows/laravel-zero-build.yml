@@ -3,9 +3,9 @@ name: CLI Beta Build
 on:
   push:
     branches: [ beta ]
-
+    
 permissions: write-all
-
+    
 jobs:
   build:
     runs-on: ubuntu-latest
